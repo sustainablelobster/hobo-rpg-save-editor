@@ -1,0 +1,33 @@
+name: Build Release Artifacts
+on:
+  push:
+    tags: ['v*']
+jobs:
+  build-exe:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - run: powershell ./scripts/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hobo-rpg-save-editor-exe
+          path: dist/hobo-rpg-save-editor.exe
+
+  build-dist:
+    name: Build Wheel and Sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - run: pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hobo-rpg-save-editor-dist
+          path: dist/

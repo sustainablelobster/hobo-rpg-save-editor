@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hobo-rpg-save-editor"
+version = "0.1.0"
+description = "Terminal save editor for Hobo: Tough Life"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "textual>=8.2.7,<9",
+    "UnityPy>=1.25.0,<1.26",
+]
+
+[project.optional-dependencies]
+build = [
+    "nuitka>=2.0",
+    "zstandard",
+]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.scripts]
+hobo-rpg-save-editor = "hobo_rpg_save_editor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hobo_rpg_save_editor"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/README.md",
+    "/pyproject.toml",
+    "/src",
+    "/tests",
+    "/research",
+    "/AGENTS.md",
+]
