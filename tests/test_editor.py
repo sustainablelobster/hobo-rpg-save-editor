@@ -618,36 +618,38 @@ class CashEditingTests(unittest.TestCase):
 
 class BackupDirectoryTests(unittest.TestCase):
     def test_default_backup_directories_follow_platform_conventions(self) -> None:
-        home = Path("/home/test")
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp) / "test_home"
+            xdg_data_home = Path(temp) / "var" / "data" / "test"
 
-        self.assertEqual(
-            editor.default_backup_dir(
-                home=Path("C:/Users/Test"),
-                env={"LOCALAPPDATA": "C:/Users/Test/AppData/Local"},
-                platform="win32",
-            ),
-            Path("C:/Users/Test/AppData/Local/Hobo Save Editor/Backups"),
-        )
-        self.assertEqual(
-            editor.default_backup_dir(home=home, env={}, platform="darwin"),
-            home
-            / "Library"
-            / "Application Support"
-            / "Hobo Save Editor"
-            / "Backups",
-        )
-        self.assertEqual(
-            editor.default_backup_dir(
-                home=home,
-                env={"XDG_DATA_HOME": "/var/data/test"},
-                platform="linux",
-            ),
-            Path("/var/data/test/hobo-save-editor/backups"),
-        )
-        self.assertEqual(
-            editor.default_backup_dir(home=home, env={}, platform="linux"),
-            home / ".local/share/hobo-save-editor/backups",
-        )
+            self.assertEqual(
+                editor.default_backup_dir(
+                    home=Path("C:/Users/Test"),
+                    env={"LOCALAPPDATA": "C:/Users/Test/AppData/Local"},
+                    platform="win32",
+                ),
+                Path("C:/Users/Test/AppData/Local/Hobo Save Editor/Backups"),
+            )
+            self.assertEqual(
+                editor.default_backup_dir(home=home, env={}, platform="darwin"),
+                home
+                / "Library"
+                / "Application Support"
+                / "Hobo Save Editor"
+                / "Backups",
+            )
+            self.assertEqual(
+                editor.default_backup_dir(
+                    home=home,
+                    env={"XDG_DATA_HOME": str(xdg_data_home)},
+                    platform="linux",
+                ),
+                xdg_data_home / "hobo-save-editor" / "backups",
+            )
+            self.assertEqual(
+                editor.default_backup_dir(home=home, env={}, platform="linux"),
+                home / ".local/share/hobo-save-editor/backups",
+            )
 
     def test_cli_backup_directory_takes_precedence_over_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -701,31 +703,37 @@ class DiscoveryTests(unittest.TestCase):
     def test_parses_legacy_libraryfolders_vdf(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = Path(temp) / "libraryfolders.vdf"
+            games_dir = Path(temp) / "games" / "SteamLibrary"
             config.write_text(
                 '"LibraryFolders"\n'
                 "{\n"
                 '  "TimeNextStatsReport" "123"\n'
-                '  "1" "/games/SteamLibrary"\n'
+                f'  "1" "{games_dir.as_posix()}"\n'
                 "}\n",
                 encoding="utf-8",
             )
 
             self.assertEqual(
                 editor.parse_library_folders(config),
-                [Path("/games/SteamLibrary")],
+                [games_dir],
             )
 
     def test_default_linux_roots_include_flatpak_steam(self) -> None:
-        roots = editor.default_steam_roots(
-            home=Path("/home/test"), env={}, platform="linux"
-        )
-        self.assertIn(
-            Path(
-                "/home/test/.var/app/com.valvesoftware.Steam/"
-                ".local/share/Steam"
-            ),
-            roots,
-        )
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp) / "test_home"
+            roots = editor.default_steam_roots(
+                home=home, env={}, platform="linux"
+            )
+            self.assertIn(
+                home
+                / ".var"
+                / "app"
+                / "com.valvesoftware.Steam"
+                / ".local"
+                / "share"
+                / "Steam",
+                roots,
+            )
 
 
 if __name__ == "__main__":
