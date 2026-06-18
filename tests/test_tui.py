@@ -932,17 +932,22 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
 
                 flag_search.value = "decided to work"
                 await pilot.pause()
-                await pilot.click("#npc-edit")
+                flag_table.focus()
+                await pilot.press("enter")
                 await pilot.pause()
                 self.assertEqual(
                     app.screen.staged_flag_values,
                     {"BrunoSpoluprace": 1},
                 )
-                await pilot.click("#npc-edit")
+                await pilot.press("enter")
                 await pilot.pause()
                 self.assertEqual(app.screen.staged_flag_values, {})
-                await pilot.click("#npc-edit")
+                await pilot.press("enter")
                 await pilot.pause()
+                self.assertEqual(
+                    app.screen.staged_flag_values,
+                    {"BrunoSpoluprace": 1},
+                )
 
                 await pilot.click("#npc-apply")
                 await pilot.pause()
