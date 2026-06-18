@@ -12,16 +12,16 @@ dependencies = [
     "textual>=8.2.7,<9",
     "UnityPy>=1.25.0,<1.26",
 ]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
 
 [project.optional-dependencies]
 build = [
     "nuitka>=2.0",
     "zstandard",
-]
-classifiers = [
-    "Environment :: Console",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
 ]
 
 [project.scripts]
