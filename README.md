@@ -26,7 +26,7 @@ Choose the method that best fits your platform and technical comfort level.
 
 ### Option 1: Standalone Windows Executable (Recommended)
 The easiest way to use the editor on Windows. No Python installation required.
-1. Go to the **[Releases](https://github.com/USER/REPO/releases)** page on GitHub.
+1. Go to the **[Releases](https://github.com/sustainablelobster/hobo-rpg-save-editor/releases)** page on GitHub.
 2. Download the latest `hobo-rpg-save-editor.exe`.
 3. Run the `.exe` directly.
 
