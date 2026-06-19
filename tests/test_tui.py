@@ -251,7 +251,7 @@ class TextualStartupTests(unittest.IsolatedAsyncioTestCase):
                 backup_dir=root / "backups",
                 discover_installs=lambda: [],
             )
-            async with app.run_test() as pilot:
+            async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
                 self.assertIsInstance(app.screen, PathEntryModal)
 
@@ -474,7 +474,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                 game_dir=game,
                 backup_dir=root / "backups",
             )
-            async with app.run_test() as pilot:
+            async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
                 await pilot.press("e")
                 await pilot.pause()
@@ -674,7 +674,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                 backup_dir=root / "backups",
                 set_primary_parameter=fail_primary_write,
             )
-            async with app.run_test() as pilot:
+            async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
                 await pilot.press("e")
                 await pilot.pause()
@@ -1111,7 +1111,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                 npc_annotation_loader=fail_annotation_load,
                 npc_writer=fail_npc_write,
             )
-            async with app.run_test() as pilot:
+            async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
                 await pilot.press("p")
                 await pilot.pause()
