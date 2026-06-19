@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Terminal save editor for Hobo: Tough Life"
 readme = "README.md"
 requires-python = ">=3.9"
+license = "MIT"
 dependencies = [
     "textual>=8.2.7,<9",
     "UnityPy>=1.25.0,<1.26",
@@ -32,6 +33,7 @@ packages = ["src/hobo_rpg_save_editor"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+    "/LICENSE",
     "/README.md",
     "/pyproject.toml",
     "/src",
