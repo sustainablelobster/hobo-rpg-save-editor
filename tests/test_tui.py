@@ -352,6 +352,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
 
                 details = str(
                     app.query_one("#save-details", Static).render()
@@ -399,6 +400,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test() as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
 
                 details = str(
                     app.query_one("#save-details", Static).render()
@@ -446,6 +448,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test() as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
                 await pilot.press("down")
                 await pilot.pause()
                 self.assertEqual(app.selected_record.save_id, SAVE_IDS[1])
@@ -487,6 +490,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
                 await pilot.press("e")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, EditValueModal)
@@ -645,6 +649,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test() as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
                 await pilot.press("e")
                 await pilot.pause()
 
@@ -686,6 +691,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
                 await pilot.press("e")
                 await pilot.pause()
                 await pilot.press("down", "enter")
@@ -776,6 +782,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
 
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
                 details = str(
                     app.query_one("#save-details", Static).render()
                 )
@@ -1030,6 +1037,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
 
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
                 self.assertFalse(
                     app.query_one("#quest-action", Button).disabled
                 )
@@ -1124,6 +1132,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
                 await pilot.press("p")
                 await pilot.pause()
                 status = str(
@@ -1203,6 +1212,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
 
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
                 await pilot.press("i")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, InventoryScreen)
