@@ -544,6 +544,8 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
+                app.query_one("#edit-value").scroll_visible(animate=False)
+                await pilot.pause()
                 await pilot.click("#edit-value")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, EditValueModal)
@@ -1021,6 +1023,8 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                     app.query_one("#quest-action", Button).disabled
                 )
 
+                app.query_one("#quest-action").scroll_visible(animate=False)
+                await pilot.pause()
                 await pilot.click("#quest-action")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, QuestScreen)
