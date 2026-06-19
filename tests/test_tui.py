@@ -257,7 +257,7 @@ class TextualStartupTests(unittest.IsolatedAsyncioTestCase):
 
                 path_input = app.screen.query_one("#game-path", Input)
                 path_input.value = str(root / "missing")
-                await pilot.click("#accept-path")
+                await pilot.press("enter")
                 await pilot.pause()
 
                 error = app.screen.query_one("#path-error", Static)
