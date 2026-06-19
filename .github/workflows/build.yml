@@ -1,7 +1,12 @@
 name: Build Release Artifacts
+
 on:
   push:
     tags: ['v*']
+
+permissions:
+  contents: write
+
 jobs:
   build-exe:
     name: Build Windows EXE
@@ -11,7 +16,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      - run: powershell ./scripts/build_windows.ps1
+      - run: ./scripts/build_windows.ps1
+        shell: pwsh
       - uses: actions/upload-artifact@v4
         with:
           name: hobo-rpg-save-editor-exe
@@ -25,9 +31,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      - run: pip install build
+      - run: python -m pip install build
       - run: python -m build
       - uses: actions/upload-artifact@v4
         with:
           name: hobo-rpg-save-editor-dist
           path: dist/
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-exe, build-dist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          else
+            gh release create "$RELEASE_TAG" release-assets/* --title "$RELEASE_TAG" --generate-notes
+          fi

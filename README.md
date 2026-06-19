@@ -107,7 +107,7 @@ The resulting `hobo-rpg-save-editor.exe` will be located in the `dist/` director
 
 The repository includes workflows for:
 - **Automated Testing**: Runs on every push/PR for Ubuntu and Windows.
-- **Automated Builds**: Generates both the Windows EXE and the Python Wheel/Sdist automatically when a new version tag (`v*`) is pushed.
+- **Automated Releases**: Builds the Windows EXE plus Python Wheel/Sdist and publishes them to a GitHub Release when a new version tag (`v*`) is pushed.
 
 ## Disclaimer
 
