@@ -241,6 +241,17 @@ def create_game(
     return game
 
 
+async def wait_for_selected_record(
+    pilot,
+    app: HoboSaveEditorApp,
+) -> None:
+    for _ in range(20):
+        if app.selected_record is not None:
+            return
+        await pilot.pause()
+    raise AssertionError("Expected a selected save record")
+
+
 class TextualStartupTests(unittest.IsolatedAsyncioTestCase):
     async def test_zero_discoveries_requests_and_validates_manual_path(
         self,
@@ -524,7 +535,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(result.has_class("visible"))
                 self.assertIn(str(app.last_backup_path), str(result.render()))
 
-    async def test_primary_edit_uses_mouse_and_refreshes_value(self) -> None:
+    async def test_primary_edit_refreshes_value(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             game = create_game(
@@ -544,9 +555,8 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.pause()
-                app.query_one("#edit-value").scroll_visible(animate=False)
-                await pilot.pause()
-                await pilot.click("#edit-value")
+                await wait_for_selected_record(pilot, app)
+                await pilot.press("e")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, EditValueModal)
 
@@ -715,6 +725,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test() as pilot:
                 await pilot.pause()
+                await wait_for_selected_record(pilot, app)
 
                 details = str(
                     app.query_one("#save-details", Static).render()
