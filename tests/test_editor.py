@@ -63,6 +63,19 @@ def make_parameter_character(
     return bytes(data)
 
 
+def make_world_time(
+    day: int = 12,
+    season: int = 1,
+    time_of_day: int = 360,
+) -> bytes:
+    data = bytearray(b"\0" * 64)
+    data[:4] = editor.WORLD_TIME_VERSION
+    raw_time = (day - 1) * editor.WORLD_TIME_DAY_LENGTH + time_of_day
+    struct.pack_into("<i", data, editor.WORLD_TIME_RAW_TIME_OFFSET, raw_time)
+    struct.pack_into("<i", data, editor.WORLD_TIME_SEASON_OFFSET, season)
+    return bytes(data)
+
+
 class SlotParsingTests(unittest.TestCase):
     def test_parse_slot_extracts_known_save_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -81,6 +94,10 @@ class SlotParsingTests(unittest.TestCase):
             self.assertEqual(
                 record.character_path,
                 account / "NFS_Characters" / f"{SAVE_ID}_ls",
+            )
+            self.assertEqual(
+                record.world_path,
+                account / "NFS_Worlds" / f"{SAVE_ID}_ls",
             )
 
     def test_scan_saves_reports_bad_slots_without_hiding_good_ones(self) -> None:
@@ -479,6 +496,185 @@ class PrimaryParameterEditingTests(unittest.TestCase):
                     )
 
             self.assertEqual(character.read_bytes(), original)
+
+
+class WorldTimeEditingTests(unittest.TestCase):
+    def test_parses_day_and_season_from_world_header(self) -> None:
+        world_time = editor.parse_world_time(make_world_time(day=30, season=4))
+
+        self.assertEqual(world_time.day, 30)
+        self.assertEqual(world_time.season, 4)
+        self.assertEqual(
+            world_time.raw_time,
+            29 * editor.WORLD_TIME_DAY_LENGTH + 360,
+        )
+
+    def test_day_comes_from_raw_time_not_obsolete_header_value(self) -> None:
+        data = bytearray(make_world_time(day=15, season=0, time_of_day=347))
+        struct.pack_into("<i", data, 0x14, 1)
+
+        world_time = editor.parse_world_time(bytes(data))
+
+        self.assertEqual(world_time.day, 15)
+        self.assertEqual(world_time.season, 0)
+
+    def test_rejects_unknown_missing_and_out_of_range_world_time(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unknown world time field"):
+            editor.locate_world_time_value(make_world_time(), "weather")
+        with self.assertRaisesRegex(editor.SaveFormatError, "too small"):
+            editor.parse_world_time(b"\0" * 8)
+        bad_version = bytearray(make_world_time())
+        bad_version[:4] = b"\0\0\0\0"
+        with self.assertRaisesRegex(editor.SaveFormatError, "Unsupported"):
+            editor.parse_world_time(bytes(bad_version))
+
+        negative_raw_time = bytearray(make_world_time())
+        struct.pack_into(
+            "<i",
+            negative_raw_time,
+            editor.WORLD_TIME_RAW_TIME_OFFSET,
+            -1,
+        )
+        with self.assertRaisesRegex(editor.SaveFormatError, "negative"):
+            editor.parse_world_time(bytes(negative_raw_time))
+        with self.assertRaisesRegex(editor.SaveFormatError, "Day is outside"):
+            editor.parse_world_time(make_world_time(day=31, time_of_day=0))
+        with self.assertRaisesRegex(
+            editor.SaveFormatError,
+            "Season is outside",
+        ):
+            editor.parse_world_time(make_world_time(season=-1))
+
+    def test_set_world_time_creates_backup_and_changes_only_target_value(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            world_dir = root / "game" / "NFS_Worlds"
+            world_dir.mkdir(parents=True)
+            world = world_dir / f"{SAVE_ID}_ls"
+            backup_dir = root / "backups"
+            original = make_world_time(day=12, season=1)
+            world.write_bytes(original)
+
+            old_value, backup = editor.set_world_time_value(
+                world,
+                "day",
+                30,
+                now=datetime(2026, 6, 13, 3, 30, 0),
+                backup_dir=backup_dir,
+            )
+
+            self.assertEqual(old_value, 12)
+            self.assertEqual(backup.read_bytes(), original)
+            self.assertEqual(backup.parent, backup_dir)
+            self.assertEqual(backup.name, f"{SAVE_ID}_ls.bak-20260613-033000")
+            self.assertEqual(list(world_dir.glob("*.bak-*")), [])
+
+            expected = bytearray(original)
+            expected_raw_time = (
+                29 * editor.WORLD_TIME_DAY_LENGTH
+                + 360
+            )
+            struct.pack_into(
+                "<i",
+                expected,
+                editor.WORLD_TIME_RAW_TIME_OFFSET,
+                expected_raw_time,
+            )
+            self.assertEqual(world.read_bytes(), expected)
+            self.assertEqual(editor.read_world_time(world).day, 30)
+            self.assertEqual(editor.read_world_time(world).season, 1)
+
+    def test_world_time_rejects_out_of_range_before_creating_backup(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            world = root / f"{SAVE_ID}_ls"
+            backup_dir = root / "backups"
+            original = make_world_time(day=12, season=1)
+            world.write_bytes(original)
+
+            with self.assertRaisesRegex(ValueError, "Day must be between"):
+                editor.set_world_time_value(
+                    world,
+                    "day",
+                    0,
+                    backup_dir=backup_dir,
+                )
+            with self.assertRaisesRegex(ValueError, "Day must be between"):
+                editor.set_world_time_value(
+                    world,
+                    "day",
+                    31,
+                    backup_dir=backup_dir,
+                )
+            with self.assertRaisesRegex(ValueError, "Season must be between"):
+                editor.set_world_time_value(
+                    world,
+                    "season",
+                    -1,
+                    backup_dir=backup_dir,
+                )
+            with self.assertRaisesRegex(ValueError, "Season must be between"):
+                editor.set_world_time_value(
+                    world,
+                    "season",
+                    editor.MAX_INT32 + 1,
+                    backup_dir=backup_dir,
+                )
+
+            self.assertEqual(world.read_bytes(), original)
+            self.assertFalse(backup_dir.exists())
+
+    def test_set_world_time_allows_uncapped_season_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            world = root / f"{SAVE_ID}_ls"
+            backup_dir = root / "backups"
+            original = make_world_time(day=12, season=1)
+            world.write_bytes(original)
+
+            old_value, backup = editor.set_world_time_value(
+                world,
+                "season",
+                999,
+                now=datetime(2026, 6, 13, 3, 30, 0),
+                backup_dir=backup_dir,
+            )
+
+            self.assertEqual(old_value, 1)
+            self.assertEqual(backup.read_bytes(), original)
+            expected = bytearray(original)
+            struct.pack_into(
+                "<i",
+                expected,
+                editor.WORLD_TIME_SEASON_OFFSET,
+                999,
+            )
+            self.assertEqual(world.read_bytes(), expected)
+            self.assertEqual(editor.read_world_time(world).day, 12)
+            self.assertEqual(editor.read_world_time(world).season, 999)
+
+    def test_world_time_backup_failure_leaves_world_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            world = root / f"{SAVE_ID}_ls"
+            original = make_world_time(day=12, season=1)
+            world.write_bytes(original)
+            invalid_backup_dir = root / "not-a-directory"
+            invalid_backup_dir.write_text("occupied", encoding="utf-8")
+
+            with self.assertRaises(OSError):
+                editor.set_world_time_value(
+                    world,
+                    "season",
+                    2,
+                    backup_dir=invalid_backup_dir,
+                )
+
+            self.assertEqual(world.read_bytes(), original)
 
 
 class AtomicWriteSafetyTests(unittest.TestCase):

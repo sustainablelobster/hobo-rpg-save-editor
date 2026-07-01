@@ -46,6 +46,7 @@ DiscoverInstalls = Callable[[], list[Path]]
 ScanSaves = Callable[[Path], tuple[list[editor.SaveRecord], list[str]]]
 SetCash = Callable[..., tuple[int, Path]]
 SetPrimaryParameter = Callable[..., tuple[int, Path]]
+SetWorldTimeValue = Callable[..., tuple[int, Path]]
 LoadItemCatalog = Callable[[Path], inventory_editor.ItemCatalog]
 WriteBagTransfer = Callable[..., Path]
 WriteFullInventoryEdit = Callable[..., Path]
@@ -85,11 +86,22 @@ class EditableValue:
     label: str
     current_value: int
     maximum_value: int
+    minimum_value: int = 0
+    kind: str = "cash"
     parameter_type: Optional[int] = None
+    world_time_field: Optional[str] = None
 
     @property
     def is_cash(self) -> bool:
-        return self.parameter_type is None
+        return self.kind == "cash"
+
+    @property
+    def is_primary_parameter(self) -> bool:
+        return self.kind == "primary"
+
+    @property
+    def is_world_time(self) -> bool:
+        return self.kind == "world_time"
 
 
 @dataclass(frozen=True)
@@ -140,23 +152,41 @@ def _editable_values(record: editor.SaveRecord) -> list[EditableValue]:
     try:
         parameters = editor.read_character_parameters(record.character_path)
     except (OSError, editor.SaveFormatError):
-        return targets
-
-    type_counts = Counter(
-        parameter.parameter_type for parameter in parameters.primary
-    )
-    targets.extend(
-        EditableValue(
-            label=parameter.display_name,
-            current_value=parameter.current_value,
-            maximum_value=parameter.maximum_value,
-            parameter_type=parameter.parameter_type,
+        pass
+    else:
+        type_counts = Counter(
+            parameter.parameter_type for parameter in parameters.primary
         )
-        for parameter in parameters.primary
-        if parameter.parameter_type in editor.PRIMARY_PARAMETER_NAMES
-        and type_counts[parameter.parameter_type] == 1
-        and parameter.maximum_value >= 0
-    )
+        targets.extend(
+            EditableValue(
+                label=parameter.display_name,
+                current_value=parameter.current_value,
+                maximum_value=parameter.maximum_value,
+                kind="primary",
+                parameter_type=parameter.parameter_type,
+            )
+            for parameter in parameters.primary
+            if parameter.parameter_type in editor.PRIMARY_PARAMETER_NAMES
+            and type_counts[parameter.parameter_type] == 1
+            and parameter.maximum_value >= 0
+        )
+
+    try:
+        world_time = record.current_world_time()
+    except (OSError, editor.SaveFormatError):
+        pass
+    else:
+        for field in editor.WORLD_TIME_FIELDS.values():
+            targets.append(
+                EditableValue(
+                    label=field.display_name,
+                    current_value=getattr(world_time, field.name),
+                    maximum_value=field.maximum_value,
+                    minimum_value=field.minimum_value,
+                    kind="world_time",
+                    world_time_field=field.name,
+                )
+            )
     return targets
 
 
@@ -183,7 +213,7 @@ class EditableValueListItem(ListItem):
         super().__init__(
             Label(
                 f"{target.label}: {target.current_value} "
-                f"(range 0-{target.maximum_value})",
+                f"(range {target.minimum_value}-{target.maximum_value})",
                 markup=False,
             )
         )
@@ -556,6 +586,15 @@ class IntegerEditModal(ModalScreen[Optional[int]]):
         color: $error;
     }
 
+    IntegerEditModal .experimental-warning {
+        height: auto;
+        margin: 1 0 0 0;
+        padding: 1;
+        border: heavy $warning;
+        color: $warning;
+        text-style: bold;
+    }
+
     IntegerEditModal .buttons {
         height: auto;
         align-horizontal: right;
@@ -573,10 +612,11 @@ class IntegerEditModal(ModalScreen[Optional[int]]):
 
     def compose(self) -> ComposeResult:
         validator = Integer(
-            minimum=0,
+            minimum=self.target.minimum_value,
             maximum=self.target.maximum_value,
             failure_description=(
-                "Enter a whole number between 0 and "
+                "Enter a whole number between "
+                f"{self.target.minimum_value} and "
                 f"{self.target.maximum_value}."
             ),
         )
@@ -586,6 +626,15 @@ class IntegerEditModal(ModalScreen[Optional[int]]):
                 f"Current value: {self.target.current_value}",
                 markup=False,
             )
+            if self.target.world_time_field == "season":
+                yield Static(
+                    "WARNING: Season editing is highly experimental. "
+                    "It often breaks the running game, and you may need "
+                    "to force-quit and restart before things work again.",
+                    id="value-warning",
+                    classes="experimental-warning",
+                    markup=False,
+                )
             yield Input(
                 value=str(self.target.current_value),
                 type="integer",
@@ -613,7 +662,8 @@ class IntegerEditModal(ModalScreen[Optional[int]]):
         self.query_one("#accept-value", Button).disabled = not is_valid
         self.query_one("#value-error", Static).update(
             "" if is_valid else (
-                "Enter a whole number between 0 and "
+                "Enter a whole number between "
+                f"{self.target.minimum_value} and "
                 f"{self.target.maximum_value}."
             )
         )
@@ -3094,15 +3144,21 @@ class HoboSaveEditorApp(App[int]):
     """Full-screen save editor application."""
 
     TITLE = "Hobo: Tough Life Save Editor"
-    SUB_TITLE = "Character value editor"
+    SUB_TITLE = "Save editor"
 
     BINDINGS = [
         Binding("q", "quit_app", "Quit"),
         Binding("r", "refresh_saves", "Refresh"),
-        Binding("e", "edit_selected", "Edit selected"),
+        Binding("e", "edit_selected", "Character/Time"),
         Binding("i", "inventory", "Inventory"),
         Binding("p", "npcs", "NPCs"),
     ]
+    ACTION_BUTTON_IDS = (
+        "edit-value",
+        "inventory-action",
+        "npc-action",
+        "quest-action",
+    )
 
     CSS = """
     Screen {
@@ -3186,7 +3242,8 @@ class HoboSaveEditorApp(App[int]):
 
     #actions {
         height: auto;
-        margin-top: 1;
+        padding: 1 0;
+        border-bottom: solid $panel;
     }
 
     #actions Button {
@@ -3197,6 +3254,16 @@ class HoboSaveEditorApp(App[int]):
 
     #actions Button.visible {
         display: block;
+    }
+
+    #actions Button:focus {
+        background: $accent;
+        color: $text;
+        text-style: bold;
+    }
+
+    #save-detail-scroll {
+        height: 1fr;
     }
 
     #result {
@@ -3238,6 +3305,9 @@ class HoboSaveEditorApp(App[int]):
         set_primary_parameter: SetPrimaryParameter = (
             editor.set_primary_parameter
         ),
+        set_world_time_value: SetWorldTimeValue = (
+            editor.set_world_time_value
+        ),
         inventory_catalog_loader: LoadItemCatalog = (
             inventory_editor.load_item_catalog
         ),
@@ -3266,6 +3336,7 @@ class HoboSaveEditorApp(App[int]):
         self.scan_saves = scan_saves
         self.cash_writer = set_cash
         self.primary_writer = set_primary_parameter
+        self.world_time_writer = set_world_time_value
         self.inventory_catalog_loader = inventory_catalog_loader
         self.bag_transfer_writer = bag_transfer_writer
         self.full_inventory_writer = full_inventory_writer
@@ -3307,22 +3378,16 @@ class HoboSaveEditorApp(App[int]):
                     classes="visible",
                     markup=False,
                 )
-            with VerticalScroll(id="detail-pane"):
+            with Vertical(id="detail-pane"):
                 yield Static(
                     "Selected save",
                     classes="pane-title",
                     markup=False,
                 )
-                yield Static(
-                    "No save selected.",
-                    id="save-details",
-                    markup=False,
-                )
                 with Horizontal(id="actions"):
                     yield Button(
-                        "Edit value",
+                        "Character/Time",
                         id="edit-value",
-                        variant="primary",
                         disabled=True,
                     )
                     yield Button(
@@ -3339,6 +3404,12 @@ class HoboSaveEditorApp(App[int]):
                         "Quests",
                         id="quest-action",
                         disabled=True,
+                    )
+                with VerticalScroll(id="save-detail-scroll"):
+                    yield Static(
+                        "No save selected.",
+                        id="save-details",
+                        markup=False,
                     )
         yield Static("", id="result", markup=False)
         yield Footer()
@@ -3507,6 +3578,15 @@ class HoboSaveEditorApp(App[int]):
             cash_text = f"Unavailable: {exc}"
 
         try:
+            world_time = record.current_world_time()
+            world_time_lines = [
+                f"Day: {world_time.day}",
+                f"Season: {world_time.season}",
+            ]
+        except (OSError, editor.SaveFormatError) as exc:
+            world_time_lines = [f"Day/season unavailable: {exc}"]
+
+        try:
             parameters = editor.read_character_parameters(
                 record.character_path
             )
@@ -3539,10 +3619,12 @@ class HoboSaveEditorApp(App[int]):
                     f"Saved: {record.saved_at}",
                     f"Account: {record.account_id}",
                     f"Cash: {cash_text}",
+                    *world_time_lines,
                     f"Save UUID: {record.save_id}",
                     "",
                     f"Slot file: {record.slot_path}",
                     f"Character file: {record.character_path}",
+                    f"World file: {record.world_path}",
                     *parameter_lines,
                     *npc_lines,
                 ]
@@ -3565,7 +3647,60 @@ class HoboSaveEditorApp(App[int]):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.list_view.id == "save-list":
-            self.action_edit_selected()
+            item = event.item
+            self._show_record(
+                item.record if isinstance(item, SaveListItem) else None
+            )
+
+    def _main_screen_active(self) -> bool:
+        return self.screen.id == "_default"
+
+    def _enabled_action_buttons(self) -> list[Button]:
+        buttons: list[Button] = []
+        for button_id in self.ACTION_BUTTON_IDS:
+            button = self.query_one(f"#{button_id}", Button)
+            if button.has_class("visible") and not button.disabled:
+                buttons.append(button)
+        return buttons
+
+    def _focus_next_action_button(self) -> bool:
+        if not self._main_screen_active():
+            return False
+        buttons = self._enabled_action_buttons()
+        if not buttons:
+            return False
+        focused = self.screen.focused
+        if focused not in buttons:
+            buttons[0].focus()
+            return True
+        index = buttons.index(focused)
+        if index < len(buttons) - 1:
+            buttons[index + 1].focus()
+        return True
+
+    def _focus_previous_action_button(self) -> bool:
+        if not self._main_screen_active():
+            return False
+        buttons = self._enabled_action_buttons()
+        focused = self.screen.focused
+        save_list = self.query_one("#save-list", ListView)
+        if focused in buttons:
+            index = buttons.index(focused)
+            if index == 0:
+                save_list.focus()
+            else:
+                buttons[index - 1].focus()
+            return True
+        if focused is not save_list:
+            save_list.focus()
+            return True
+        return False
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "right" and self._focus_next_action_button():
+            event.stop()
+        elif event.key == "left" and self._focus_previous_action_button():
+            event.stop()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "edit-value":
@@ -3952,11 +4087,19 @@ class HoboSaveEditorApp(App[int]):
                     new_value,
                     backup_dir=self.backup_dir,
                 )
-            else:
+            elif target.is_primary_parameter:
                 assert target.parameter_type is not None
                 old_value, backup_path = self.primary_writer(
                     record.character_path,
                     target.parameter_type,
+                    new_value,
+                    backup_dir=self.backup_dir,
+                )
+            else:
+                assert target.world_time_field is not None
+                old_value, backup_path = self.world_time_writer(
+                    record.world_path,
+                    target.world_time_field,
                     new_value,
                     backup_dir=self.backup_dir,
                 )

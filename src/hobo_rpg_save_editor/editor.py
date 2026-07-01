@@ -20,7 +20,14 @@ GAME_DIR_NAME = "Hobo Tough Life"
 SAVE_DIR = Path("HoboRPG_Data") / "Save"
 BACKUP_DIR_ENV = "HOBOTOUGHLIFE_BACKUP_DIR"
 CASH_KEY = b"\x04cash"
-MAX_CASH = (1 << 31) - 1
+MAX_INT32 = (1 << 31) - 1
+MAX_CASH = MAX_INT32
+WORLD_TIME_VERSION = b"\xaeG\xe1>"
+WORLD_TIME_MIN_SIZE = 0x0C
+WORLD_TIME_RAW_TIME_OFFSET = 0x04
+WORLD_TIME_SEASON_OFFSET = 0x08
+WORLD_TIME_DAY_LENGTH = 18 * 60
+WORLD_TIME_MAX_DAY = 30
 PRIMARY_PARAMETER_COUNT_OFFSET = 0xBC
 PRIMARY_PARAMETER_RECORD_OFFSET = 0xC0
 PRIMARY_PARAMETER_RECORD_SIZE = 12
@@ -95,6 +102,40 @@ class CharacterParameters:
 
 
 @dataclass(frozen=True)
+class WorldTimeField:
+    name: str
+    display_name: str
+    offset: int
+    minimum_value: int
+    maximum_value: int
+
+
+WORLD_TIME_FIELDS = {
+    "day": WorldTimeField(
+        name="day",
+        display_name="Day",
+        offset=WORLD_TIME_RAW_TIME_OFFSET,
+        minimum_value=1,
+        maximum_value=WORLD_TIME_MAX_DAY,
+    ),
+    "season": WorldTimeField(
+        name="season",
+        display_name="Season",
+        offset=WORLD_TIME_SEASON_OFFSET,
+        minimum_value=0,
+        maximum_value=MAX_INT32,
+    ),
+}
+
+
+@dataclass(frozen=True)
+class WorldTime:
+    day: int
+    season: int
+    raw_time: int
+
+
+@dataclass(frozen=True)
 class SaveRecord:
     account_id: str
     slot_name: str
@@ -103,9 +144,13 @@ class SaveRecord:
     saved_at: str
     slot_path: Path
     character_path: Path
+    world_path: Path
 
     def current_cash(self) -> int:
         return read_cash(self.character_path)
+
+    def current_world_time(self) -> WorldTime:
+        return read_world_time(self.world_path)
 
 
 class BinaryReader:
@@ -167,7 +212,9 @@ def parse_slot(path: Path) -> SaveRecord:
 
     display_name = raw_name.strip(" /") or raw_name or "(unnamed)"
     account_dir = path.parent.parent
-    character_path = account_dir / "NFS_Characters" / f"{save_id}_ls"
+    save_file_name = f"{save_id}_ls"
+    character_path = account_dir / "NFS_Characters" / save_file_name
+    world_path = account_dir / "NFS_Worlds" / save_file_name
     return SaveRecord(
         account_id=account_dir.name,
         slot_name=path.name,
@@ -176,6 +223,7 @@ def parse_slot(path: Path) -> SaveRecord:
         saved_at=saved_at,
         slot_path=path,
         character_path=character_path,
+        world_path=world_path,
     )
 
 
@@ -558,6 +606,105 @@ def read_cash(path: Path) -> int:
     return locate_cash(path.read_bytes())[1]
 
 
+def _world_time_field(field_name: str) -> WorldTimeField:
+    try:
+        return WORLD_TIME_FIELDS[field_name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown world time field: {field_name}") from exc
+
+
+def _validate_world_time_header(data: bytes) -> None:
+    if len(data) < WORLD_TIME_MIN_SIZE:
+        raise SaveFormatError("World file is too small to contain time data")
+    if data[:4] != WORLD_TIME_VERSION:
+        raise SaveFormatError(
+            "Unsupported world file time format; expected version 0.44"
+        )
+
+
+def _validate_existing_world_time_value(
+    field: WorldTimeField,
+    value: int,
+) -> None:
+    if field.minimum_value <= value <= field.maximum_value:
+        return
+    raise SaveFormatError(
+        f"{field.display_name} is outside the supported range "
+        f"{field.minimum_value}-{field.maximum_value}: {value}"
+    )
+
+
+def _validate_new_world_time_value(
+    field: WorldTimeField,
+    value: int,
+) -> None:
+    if field.minimum_value <= value <= field.maximum_value:
+        return
+    raise ValueError(
+        f"{field.display_name} must be between "
+        f"{field.minimum_value} and {field.maximum_value}"
+    )
+
+
+def _raw_time_to_day(raw_time: int) -> int:
+    if raw_time < 0:
+        raise SaveFormatError(f"World raw time is negative: {raw_time}")
+    day = raw_time // WORLD_TIME_DAY_LENGTH + 1
+    field = _world_time_field("day")
+    _validate_existing_world_time_value(field, day)
+    return day
+
+
+def _raw_time_for_day(raw_time: int, day: int) -> int:
+    _raw_time_to_day(raw_time)
+    field = _world_time_field("day")
+    _validate_new_world_time_value(field, day)
+    time_of_day = raw_time % WORLD_TIME_DAY_LENGTH
+    return (day - 1) * WORLD_TIME_DAY_LENGTH + time_of_day
+
+
+def locate_world_time_value(
+    data: bytes,
+    field_name: str,
+) -> tuple[int, int]:
+    """Locate one supported world-time integer by fixed world header offset."""
+    field = _world_time_field(field_name)
+    _validate_world_time_header(data)
+    stored_value = struct.unpack_from("<i", data, field.offset)[0]
+    value = (
+        _raw_time_to_day(stored_value)
+        if field.name == "day"
+        else stored_value
+    )
+    _validate_existing_world_time_value(field, value)
+    return field.offset, value
+
+
+def parse_world_time(data: bytes) -> WorldTime:
+    """Parse the observed day and season integers from an NFS_Worlds file."""
+    _validate_world_time_header(data)
+    raw_time = struct.unpack_from(
+        "<i",
+        data,
+        WORLD_TIME_RAW_TIME_OFFSET,
+    )[0]
+    values = {
+        name: locate_world_time_value(data, name)[1]
+        for name in WORLD_TIME_FIELDS
+    }
+    return WorldTime(
+        day=values["day"],
+        season=values["season"],
+        raw_time=raw_time,
+    )
+
+
+def read_world_time(path: Path) -> WorldTime:
+    if not path.is_file():
+        raise SaveFormatError(f"World file not found: {path}")
+    return parse_world_time(path.read_bytes())
+
+
 def _next_backup_path(
     path: Path, backup_dir: Path, now: Optional[datetime] = None
 ) -> Path:
@@ -712,6 +859,39 @@ def set_primary_parameter(
         backup_dir=backup_dir,
     )
     return parameter.current_value, backup_path
+
+
+def set_world_time_value(
+    path: Path,
+    field_name: str,
+    new_value: int,
+    now: Optional[datetime] = None,
+    backup_dir: Optional[Path] = None,
+) -> tuple[int, Path]:
+    """Set one supported world time value in an NFS_Worlds save file."""
+    field = _world_time_field(field_name)
+    _validate_new_world_time_value(field, new_value)
+
+    original = path.read_bytes()
+    value_offset, old_value = locate_world_time_value(original, field_name)
+    updated = bytearray(original)
+    stored_value = (
+        _raw_time_for_day(
+            struct.unpack_from("<i", original, value_offset)[0],
+            new_value,
+        )
+        if field.name == "day"
+        else new_value
+    )
+    struct.pack_into("<i", updated, value_offset, stored_value)
+    backup_path = _write_updated_character(
+        path,
+        original,
+        bytes(updated),
+        now=now,
+        backup_dir=backup_dir,
+    )
+    return old_value, backup_path
 
 
 def run_tui(

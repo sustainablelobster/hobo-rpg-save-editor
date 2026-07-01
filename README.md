@@ -35,7 +35,7 @@ Recommended for Linux and macOS users, or Windows users who prefer a Python-mana
 1. Download the `.whl` file from the latest release.
 2. Install it via pip:
    ```sh
-   pip install hobo_rpg_save_editor-0.1.0-py3-none-any.whl
+   pip install hobo_rpg_save_editor-0.2.0-py3-none-any.whl
    ```
 
 ### Option 3: Development Install (From Source)

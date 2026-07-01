@@ -104,6 +104,19 @@ def make_character(
     return bytes(data).ljust(1024, b"\0")
 
 
+def make_world_time(
+    day: int = 12,
+    season: int = 1,
+    time_of_day: int = 360,
+) -> bytes:
+    data = bytearray(b"\0" * 64)
+    data[:4] = editor.WORLD_TIME_VERSION
+    raw_time = (day - 1) * editor.WORLD_TIME_DAY_LENGTH + time_of_day
+    struct.pack_into("<i", data, editor.WORLD_TIME_RAW_TIME_OFFSET, raw_time)
+    struct.pack_into("<i", data, editor.WORLD_TIME_SEASON_OFFSET, season)
+    return bytes(data)
+
+
 def with_reputation_table(
     data: bytes,
     values: Optional[dict[int, int]] = None,
@@ -233,11 +246,16 @@ def create_game(
     account = game / editor.SAVE_DIR / "12345"
     configs = account / "NFS_WorldConfigs"
     characters = account / "NFS_Characters"
+    worlds = account / "NFS_Worlds"
     configs.mkdir(parents=True, exist_ok=True)
     characters.mkdir(parents=True, exist_ok=True)
+    worlds.mkdir(parents=True, exist_ok=True)
     for index, (save_id, name, cash) in enumerate(saves):
         (configs / f"slot{index}").write_bytes(make_slot(save_id, name))
         (characters / f"{save_id}_ls").write_bytes(make_character(cash))
+        (worlds / f"{save_id}_ls").write_bytes(
+            make_world_time(day=12 + index, season=index % 4)
+        )
     return game
 
 
@@ -354,9 +372,16 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 await wait_for_selected_record(pilot, app)
 
-                details = str(
-                    app.query_one("#save-details", Static).render()
+                actions = app.query_one("#actions")
+                details = app.query_one("#save-details", Static)
+                self.assertEqual(actions.parent.id, "detail-pane")
+                self.assertEqual(details.parent.id, "save-detail-scroll")
+                self.assertEqual(
+                    str(app.query_one("#edit-value", Button).label),
+                    "Character/Time",
                 )
+
+                details = str(details.render())
                 self.assertIn("Primary parameters:", details)
                 self.assertIn("Health: 86 / 100", details)
                 self.assertIn("Energy: 75 / 100", details)
@@ -406,6 +431,8 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                     app.query_one("#save-details", Static).render()
                 )
                 self.assertIn("Cash: 100", details)
+                self.assertIn("Day: 12", details)
+                self.assertIn("Season: 0", details)
                 self.assertIn(
                     "Parameters unavailable: "
                     "Primary parameter count is negative",
@@ -418,6 +445,54 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("e")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, EditValueModal)
+
+    async def test_world_time_failure_keeps_cash_edit_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            game = create_game(
+                root,
+                ((SAVE_IDS[0], "First", 100),),
+            )
+            world = (
+                game
+                / editor.SAVE_DIR
+                / "12345"
+                / "NFS_Worlds"
+                / f"{SAVE_IDS[0]}_ls"
+            )
+            world.write_bytes(b"not a world time save")
+            app = HoboSaveEditorApp(
+                game_dir=game,
+                backup_dir=root / "backups",
+            )
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await wait_for_selected_record(pilot, app)
+
+                details = str(
+                    app.query_one("#save-details", Static).render()
+                )
+                self.assertIn("Cash: 100", details)
+                self.assertIn("Day/season unavailable:", details)
+                self.assertFalse(
+                    app.query_one("#edit-value", Button).disabled
+                )
+
+                await pilot.press("e")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, EditValueModal)
+                value_list = app.screen.query_one(
+                    "#edit-value-list",
+                    ListView,
+                )
+                labels = [
+                    item.target.label
+                    for item in value_list.children
+                    if isinstance(item, EditableValueListItem)
+                ]
+                self.assertIn("Cash", labels)
+                self.assertNotIn("Day", labels)
+                self.assertNotIn("Season", labels)
 
     async def test_selection_and_refresh_preserve_save_uuid(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -449,10 +524,43 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test() as pilot:
                 await pilot.pause()
                 await wait_for_selected_record(pilot, app)
-                await pilot.press("down")
+                save_list = app.query_one("#save-list", ListView)
+                await pilot.click(save_list.children[1])
                 await pilot.pause()
                 self.assertEqual(app.selected_record.save_id, SAVE_IDS[1])
+                self.assertNotIsInstance(app.screen, EditValueModal)
 
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertEqual(app.selected_record.save_id, SAVE_IDS[1])
+                self.assertNotIsInstance(app.screen, EditValueModal)
+
+                edit_button = app.query_one("#edit-value", Button)
+                inventory_button = app.query_one("#inventory-action", Button)
+                npc_button = app.query_one("#npc-action", Button)
+                quest_button = app.query_one("#quest-action", Button)
+                self.assertTrue(npc_button.disabled)
+                self.assertTrue(quest_button.disabled)
+
+                await pilot.press("right")
+                await pilot.pause()
+                self.assertTrue(edit_button.has_focus)
+                await pilot.press("right")
+                await pilot.pause()
+                self.assertTrue(inventory_button.has_focus)
+                await pilot.press("right")
+                await pilot.pause()
+                self.assertTrue(inventory_button.has_focus)
+                await pilot.press("left")
+                await pilot.pause()
+                self.assertTrue(edit_button.has_focus)
+                await pilot.press("left")
+                await pilot.pause()
+                self.assertTrue(save_list.has_focus)
+
+                await pilot.press("right")
+                await pilot.pause()
+                self.assertTrue(edit_button.has_focus)
                 await pilot.press("enter")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, EditValueModal)
@@ -614,6 +722,168 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertTrue(app.last_backup_path.is_file())
 
+    async def test_day_edit_refreshes_world_time(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            game = create_game(
+                root,
+                ((SAVE_IDS[0], "First", 100),),
+            )
+            account = game / editor.SAVE_DIR / "12345"
+            character = account / "NFS_Characters" / f"{SAVE_IDS[0]}_ls"
+            world = account / "NFS_Worlds" / f"{SAVE_IDS[0]}_ls"
+            original_character = character.read_bytes()
+            app = HoboSaveEditorApp(
+                game_dir=game,
+                backup_dir=root / "backups",
+            )
+            async with app.run_test(size=(100, 40)) as pilot:
+                await pilot.pause()
+                await wait_for_selected_record(pilot, app)
+                await pilot.press("e")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, EditValueModal)
+
+                value_list = app.screen.query_one(
+                    "#edit-value-list",
+                    ListView,
+                )
+                day_item = next(
+                    item
+                    for item in value_list.children
+                    if isinstance(item, EditableValueListItem)
+                    and item.target.label == "Day"
+                )
+                await pilot.click(day_item)
+                await pilot.pause()
+                self.assertIsInstance(app.screen, IntegerEditModal)
+                self.assertEqual(
+                    list(app.screen.query("#value-warning")),
+                    [],
+                )
+
+                value_input = app.screen.query_one("#value-input", Input)
+                value_input.value = "0"
+                await pilot.pause()
+                self.assertTrue(
+                    app.screen.query_one("#accept-value", Button).disabled
+                )
+                value_input.value = "31"
+                await pilot.pause()
+                self.assertTrue(
+                    app.screen.query_one("#accept-value", Button).disabled
+                )
+                value_input.value = "30"
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ConfirmationModal)
+                self.assertIn(
+                    "Change Day from 12 to 30?",
+                    str(
+                        app.screen.query_one(
+                            "#confirmation-message",
+                            Static,
+                        ).render()
+                    ),
+                )
+                await pilot.click("#confirm-change")
+                await pilot.pause()
+
+                self.assertEqual(editor.read_world_time(world).day, 30)
+                self.assertEqual(editor.read_world_time(world).season, 0)
+                self.assertEqual(character.read_bytes(), original_character)
+                details = str(
+                    app.query_one("#save-details", Static).render()
+                )
+                self.assertIn("Day: 30", details)
+                self.assertIn("Season: 0", details)
+                self.assertIn(
+                    "Day changed from 12 to 30",
+                    str(app.query_one("#result", Static).render()),
+                )
+                self.assertTrue(app.last_backup_path.is_file())
+
+    async def test_season_edit_accepts_values_above_observed_range(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            game = create_game(
+                root,
+                ((SAVE_IDS[0], "First", 100),),
+            )
+            account = game / editor.SAVE_DIR / "12345"
+            character = account / "NFS_Characters" / f"{SAVE_IDS[0]}_ls"
+            world = account / "NFS_Worlds" / f"{SAVE_IDS[0]}_ls"
+            original_character = character.read_bytes()
+            app = HoboSaveEditorApp(
+                game_dir=game,
+                backup_dir=root / "backups",
+            )
+            async with app.run_test(size=(100, 40)) as pilot:
+                await pilot.pause()
+                await wait_for_selected_record(pilot, app)
+                await pilot.press("e")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, EditValueModal)
+
+                value_list = app.screen.query_one(
+                    "#edit-value-list",
+                    ListView,
+                )
+                season_item = next(
+                    item
+                    for item in value_list.children
+                    if isinstance(item, EditableValueListItem)
+                    and item.target.label == "Season"
+                )
+                await pilot.click(season_item)
+                await pilot.pause()
+                self.assertIsInstance(app.screen, IntegerEditModal)
+                warning = str(
+                    app.screen.query_one("#value-warning", Static).render()
+                )
+                self.assertIn(
+                    "Season editing is highly experimental",
+                    warning,
+                )
+                self.assertIn("force-quit and restart", warning)
+
+                value_input = app.screen.query_one("#value-input", Input)
+                value_input.value = "999"
+                await pilot.pause()
+                self.assertFalse(
+                    app.screen.query_one("#accept-value", Button).disabled
+                )
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ConfirmationModal)
+                self.assertIn(
+                    "Change Season from 0 to 999?",
+                    str(
+                        app.screen.query_one(
+                            "#confirmation-message",
+                            Static,
+                        ).render()
+                    ),
+                )
+                await pilot.click("#confirm-change")
+                await pilot.pause()
+
+                self.assertEqual(editor.read_world_time(world).day, 12)
+                self.assertEqual(editor.read_world_time(world).season, 999)
+                self.assertEqual(character.read_bytes(), original_character)
+                details = str(
+                    app.query_one("#save-details", Static).render()
+                )
+                self.assertIn("Day: 12", details)
+                self.assertIn("Season: 999", details)
+                self.assertIn(
+                    "Season changed from 0 to 999",
+                    str(app.query_one("#result", Static).render()),
+                )
+                self.assertTrue(app.last_backup_path.is_file())
+
     async def test_chooser_excludes_unknown_duplicate_and_bad_maximum(
         self,
     ) -> None:
@@ -662,7 +932,7 @@ class TextualEditorTests(unittest.IsolatedAsyncioTestCase):
                     for item in value_list.children
                     if isinstance(item, EditableValueListItem)
                 ]
-                self.assertEqual(labels, ["Cash", "Energy"])
+                self.assertEqual(labels, ["Cash", "Energy", "Day", "Season"])
 
     async def test_primary_write_failure_keeps_state_and_shows_error(
         self,

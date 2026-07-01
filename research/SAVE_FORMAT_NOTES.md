@@ -839,6 +839,56 @@ StatusZlodejNum
 Most of these appear to be quest or progression state rather than general
 character attributes.
 
+## World Day And Season
+
+Day and season are stored in the matching world save file:
+
+```text
+HoboRPG_Data/Save/<Steam account>/NFS_Worlds/<save UUID>_ls
+```
+
+The observed world files begin with this little-endian float/version marker:
+
+```text
+AE 47 E1 3E // 0.44
+```
+
+The currently supported season field is a fixed signed `int32` header value.
+The displayed day is derived from the signed `int32` raw time value:
+
+```text
+day = floor(raw_time / 1080) + 1
+```
+
+The `1080` divisor matches an 18-hour in-game day. When editing the displayed
+day, the editor preserves `raw_time % 1080`, so changing the day does not also
+jump the time of day.
+
+The day editor is capped to `1-30`, matching the wiki-confirmed length of one
+season. The season editor intentionally has no gameplay cap while this field is
+being tested; it only enforces the non-negative signed `int32` storage range.
+Day still writes the raw-time field rather than the unrelated value at `0x14`.
+
+| Field | Offset | Supported range | Observed active values |
+|---|---:|---:|---|
+| Season | `0x08` | `0-2147483647` | `0`, `1` |
+| Raw time backing Day | `0x04` | displayed day `1-30` | `5031`, `15480`, `24402` |
+
+Observed slot/world pairs:
+
+| Slot | Save UUID | Raw time | Season | Displayed day |
+|---|---|---:|---:|---:|
+| `slot5` | `e1f4a340-ecbf-4f71-a80f-8f2ed6b26b3b` | `24402` | `1` | `23` |
+| `slot1` | `fa5726ae-cb04-4a29-9229-24ed23e45644` | `15480` | `0` | `15` |
+| `slot0` | `076cd3aa-012e-45ba-b41b-5de616db15ae` | `15467` | `0` | `15` |
+
+The value at `0x14` was initially misidentified as Day because it contained
+values in a plausible day range in some saves. A live check showed the game
+still displayed day 15 after the editor changed `0x14` to `1`, while `0x04`
+was `15467`; `floor(15467 / 1080) + 1 == 15`. The editor changes only the
+selected four-byte raw-time or season field and writes through the shared
+backup and atomic verification path.
+
 ## Reputation Table And Editing
 
 Reputation is structurally readable and writable through a staged TUI screen.

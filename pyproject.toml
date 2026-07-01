@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hobo-rpg-save-editor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Terminal save editor for Hobo: Tough Life"
 readme = "README.md"
 requires-python = ">=3.9"
